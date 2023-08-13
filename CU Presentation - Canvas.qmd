@@ -1,0 +1,152 @@
+---
+title: "Relationship between assignment and grading practices in Canvas and student success"
+
+format: 
+  html:
+    theme: sandstone
+    fontsize: 1.4em
+    toc: true
+execute:
+  echo: false
+jupyter: python3
+editor: visual
+date: 2023-08-14
+author: Jayson Webb, PhD
+---
+
+```{python}
+#import libraries you need
+import pandas as pd
+import numpy as np
+import plotly.express as px
+
+from datetime import datetime
+
+import warnings
+warnings.filterwarnings('ignore')
+
+import plotly.io as pio
+from IPython.display import display, Markdown
+
+```
+
+```{python}
+#data given for the interview
+df = pd.read_csv('interview_dataset.csv')
+
+#Do transformations, etc.
+#First, transform the date fields into date type
+cols = df.columns
+for c in cols:
+    if 'date' in c:
+        df[c] = pd.to_datetime(df[c])
+
+#Do lots of date calculations
+df['graded_time_diff'] = df.assignment_latest_graded_date - df.assignment_earliest_graded_date
+df['duedate_time_diff'] = df.assignment_latest_graded_date - df.assignment_due_date
+df['termstart_time_diff'] = df.assignment_due_date - df.term_start_date
+df['termendGDD_time_diff'] = df.term_end_date - df.assignment_latest_graded_date
+
+df['graded_time_diff'] = df['graded_time_diff'].dt.days
+df['duedate_time_diff'] = df['duedate_time_diff'].dt.days
+df['termstart_time_diff'] = df['termstart_time_diff'].dt.days
+df['termendGDD_time_diff'] = df['termendGDD_time_diff'].dt.days
+
+#Replace assignment_due_date from NaN to none, to match assignment type
+df.assignment_due_date = df.assignment_due_date.fillna('none')
+```
+
+```{python}
+#Make two new variables out of class_name: major (e.g. CHEM) and level (e.g. 1000)
+df['subject'] = ''
+df['level'] = ''
+df['level2'] = ''
+for i in range(len(df.class_name)):
+    words = df.class_name[i].split()
+    df['subject'][i] = words[0]
+    level = words[1].split('-')
+    df['level'][i] = level[0]
+    df['level2'][i] = level[1]
+
+#Make has_due_date and has_assignment_type boolean variables
+df['has_due_date'] = df['assignment_due_date'] != "none"
+df['has_assignment_type'] = df['assignment_type'] != "none"
+
+df.level = df.level.astype(int)
+for i in range(len(df.level)):
+    df.level[i] = round(df.level[i],-3)
+```
+
+```{python}
+#Create dataframes for each of the time scatterplots
+#dfx has the data when there is a due date
+dfx = df[df.has_due_date == True].reset_index(drop=True)
+dfx = dfx[dfx.assignment_due_date < datetime.strptime('2022-12-31','%Y-%m-%d')]
+dfx = dfx[dfx.termstart_time_diff > 0]
+dfx_box = dfx[(dfx.duedate_time_diff >= 0) & (dfx.duedate_time_diff <= 120) & (dfx.graded_time_diff >= 0) & (dfx.graded_time_diff <= 120)]
+
+#dfy has the data for NO DUE DATE
+dfy=df[df.has_due_date == False].reset_index(drop=True)
+
+```
+
+# Distribution of graded date differences when there is a due date
+
+```{python}
+fig = px.scatter(dfx, x="duedate_time_diff", y="graded_time_diff", width=900, height=600,
+                 color_discrete_sequence=px.colors.qualitative.Dark24,
+                 color='termstart_time_diff',
+                 title = 'Latest graded - Due Date vs Latest-Earliest Graded Dates',
+                 template = 'plotly_white',
+                 log_x=False, log_y=False,           
+                 labels={
+                     "duedate_time_diff": "Latest graded date - Due date (days)",
+                     "graded_time_diff": "Latest - earliest graded date (days)",
+                     "termstart_time_diff":"Due date - Term start date (days)"
+                 },
+                hover_name="class_name",hover_data={'assignment_latest_graded_date',
+                                                    'assignment_earliest_graded_date',
+                                                    'assignment_due_date',
+                                                    'assignment_type',
+                                                    'assignment_name'
+                                                    
+                                             })
+fig.update_traces(opacity=.1)
+fig.show()
+```
+
+- Most (97%) of the data falls in a 120x120 day box (semesters are 115 days)
+- The points in the upper right (and possibly lower right) are data entry errors
+- The data in “the box” shows three groupings - the left edge, bottom edge and everything else
+
+# Due date based graded date differences - zoomed in
+
+```{python}
+fig = px.scatter(dfx_box, x="duedate_time_diff", y="graded_time_diff", width=800, height=500, 
+                 color_discrete_sequence=px.colors.qualitative.Dark24,
+                 color='termstart_time_diff',
+                 title = 'Latest graded - Due Date vs Latest-Earliest Graded Dates',
+                 template = 'plotly_white',
+                 log_x=False, log_y=False,           
+                 labels={
+                     "duedate_time_diff": "Latest graded date - Due date (days)",
+                     "graded_time_diff": "Latest - earliest graded date (days)",
+                     "termstart_time_diff":"Due date - Term start date (days)"
+                 },
+                hover_name="class_name",hover_data={'assignment_latest_graded_date',
+                                                    'assignment_earliest_graded_date',
+                                                    'assignment_due_date',
+                                                    'assignment_type',
+                                                    'assignment_name'
+                                                    
+                                             })
+fig.update_traces(opacity=.1)
+fig.show()
+```
+
+There are three clusters in this data:
+
+- Left edge: (27.5%) Graded within 1 day of due date
+- Bottom edge: (27.5%, 39% if you count overlap with left edge) All graded within 3 days 
+- Middle: (45%) Everything else
+
