@@ -90,10 +90,10 @@ dfy=df[df.has_due_date == False].reset_index(drop=True)
 
 ```
 
-# Distribution of graded date differences when there is a due date
+# Distribution of timeliness data when there is a due date
 
 ```{python}
-fig = px.scatter(dfx, x="duedate_time_diff", y="graded_time_diff", width=900, height=600,
+fig = px.scatter(dfx, x="duedate_time_diff", y="graded_time_diff", width=800, height=500,
                  color_discrete_sequence=px.colors.qualitative.Dark24,
                  color='termstart_time_diff',
                  title = 'Latest graded - Due Date vs Latest-Earliest Graded Dates',
@@ -119,7 +119,7 @@ fig.show()
 - The points in the upper right (and possibly lower right) are data entry errors
 - The data in “the box” shows three groupings - the left edge, bottom edge and everything else
 
-# Due date based graded date differences - zoomed in
+# Timeliness Data - zoomed in
 
 ```{python}
 fig = px.scatter(dfx_box, x="duedate_time_diff", y="graded_time_diff", width=800, height=500, 
@@ -144,9 +144,48 @@ fig.update_traces(opacity=.1)
 fig.show()
 ```
 
-There are three clusters in this data:
+- There are three clusters in this data:
+- 47% of data is along bottom edge (graded within 5 days)
+- Bottom edge is where timeliness issues are found.
+- 22% of all data in “the box” them were graded 7 or more days after the due date (and within 5 days of each other)
+- 15% of all data in “the box” them were graded 14 or more days after the due date (and within 5 days of each other)
 
-- Left edge: (27.5%) Graded within 1 day of due date
-- Bottom edge: (27.5%, 39% if you count overlap with left edge) All graded within 3 days 
-- Middle: (45%) Everything else
+# Timeliness Data - No Due Date
 
+```{python}
+dfy=df[df.has_due_date == False].reset_index(drop=True)
+dfy = dfy.sort_values(by=['termendGDD_time_diff','graded_time_diff'],ascending=False)
+dfy_box = dfy[(dfy.graded_time_diff >= 0) & (dfy.graded_time_diff <= 120)].reset_index(drop=True)
+dfy_box = dfy_box.sort_values(by=['termendGDD_time_diff','graded_time_diff'],ascending=False)
+
+fig = px.scatter(dfy_box, x=dfy_box.index,y="graded_time_diff", width=800, height=500, #trendline="ols", trendline_scope="overall",
+                 color_discrete_sequence=px.colors.qualitative.Dark24,
+                 color='termendGDD_time_diff',
+                 title = 'Latest-Earliest Graded Difference',
+                 template = 'plotly_white',
+                 log_x=False, log_y=False,           
+                 labels={
+                     "graded_time_diff": "Latest - earliest graded date (days)",
+                     "termendGDD_time_diff":"Term end - Latest graded date"
+                 },
+                hover_name="class_name",hover_data={'assignment_latest_graded_date',
+                                                    'assignment_earliest_graded_date',
+                                                    'assignment_type',
+                                                    'assignment_name',
+                                                    'assignment_posted_date',
+                                                    
+                                             }
+                )
+# fig.add_vline(x=14900, line_dash="dot",
+#               opacity=0.9,
+#               annotation_text=" Semester End -> ", 
+#               annotation_position="top left"
+#              )
+fig.update_traces(opacity=.1)
+fig.update_traces(marker={'size': 7})
+fig.update_xaxes(showticklabels=False,title='')
+fig.show()
+```
+
+- 72% of data is along bottom edge (graded within 5 days), compared to 47% when there was a due date.
+- Something must be qualitatively different between the two sets.
