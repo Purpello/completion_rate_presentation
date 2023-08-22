@@ -1,0 +1,413 @@
+---
+title: "Predicting Differences in Six-Year Completion Rate for 41 Large Four-Year Universities"
+subtitle: "With a focus on White, Black and Hispanic students"
+format: 
+  html:
+    theme: sandstone
+    fontsize: 1em
+    toc: true
+    toc-location: left
+execute:
+  echo: false
+jupyter: python3
+editor: visual
+title-block-banner: true
+date: 2023-08-21
+author:
+  name: Jayson Webb, PhD 
+        <p style="margin-top:-24px">
+        jayson.m.webb@gmail.com
+        </p>
+  email: jayson.m.webb@gmail.com
+---
+
+# Rationale and Purpose
+
+Six-year completion rate **(SYCR)** is the proportion of students enrolled in an institution who sought and achieved a degree within 6 years (150% of normal time for a four-year institution) and is a common [measure of university student success](https://www.evisions.com/resources/blog/5-commonly-found-metrics-student-success/). If one university is to be compared to other similar universities on SYCR, it is important to understand the most important factors that cause universities to differ on this measure. Furthermore, universities nationwide recognize that there are [ethnic disparities in graduation rates](https://nces.ed.gov/ipeds/search?query=&query2=&resultType=table&page=1&sortBy=date_desc&surveyComponents=Admissions%20(ADM)&surveyComponents=Graduation%20Rates%20(GR)&surveyComponents=Graduation%20Rates%20200%%20(GR200)&surveyComponents=Outcome%20Measures%20(OM)&surveyComponents=Student%20Financial%20Aid%20(SFA)&collectionYears=2020-21&sources=Tables%20Library&overlayTableId=32472) and that those gaps should be closed. So, understanding how SYCR drivers differ by ethnicity is important.
+
+This is an **exploratory investigation** in order to understand the factors that predict differences in SYCR among the selected universities and how those might differ for White, Black and Hispanic students. The purpose is to present early results for feedback and **get a decision on how or if to proceed.**
+
+# College Scorecard Data
+
+College Scorecard data was used to investigate the factors that drive six-year completion rate (SYCR). This data covers a wide range of institution types from small two-year, commuter, associate degree institutions to large four-year, bachelor degree institutions that are also doctoral universities with very high research activity. Some characteristics of the data include:
+
+-   6,543 institutions
+-   3,214 variables
+-   [Publicly available](https://collegescorecard.ed.gov/data/) from the US Department of Education for the academic year 2021-2022
+-   Well documented via an extensive data dictionary
+
+```{python}
+#Load the libraries we will use
+import pandas as pd
+import numpy as np
+from matplotlib import pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.io as pio
+
+from IPython.display import display, Markdown
+from statsmodels.formula.api import ols
+
+import warnings
+warnings.filterwarnings('ignore')
+
+# Read in the data# Most Recent Institution-Level Data
+# from https://collegescorecard.ed.gov/data/
+# 2021-2022 school year
+df = pd.read_csv('Most-Recent-Cohorts-Institution.csv')
+
+```
+
+# Criteria for selecting the 41 universities
+
+The University of Colorado, Boulder (CU Boulder) was chosen as the focus of this investigation. In order to compare CU Boulder to similar institutions, the data were explored to find criteria that **resemble CU Boulder** . The 41 universities were selected from 6,543 institutions based on these criteria:
+
+-   Higher Learning Commission is the accreditor for the institution
+-   Publicly controlled
+-   Main campus
+-   Admission rate \> 0.15 (screens out some military academies)
+-   More than 10,000 undergraduates
+-   Four-year, full-time programs
+-   Doctoral universities with high or very high research activities
+-   Primarily grant bachelor's degrees
+
+```{python}
+
+#Code for filtering the universities and renaming columns to be more easily understood
+#See the data dictionary in the GitHub repository for definitions of the following variables
+
+query = 'ACCREDAGENCY == "Higher Learning Commission" & \
+        CONTROL == 1 & \
+        MAIN == 1 & \
+        ADM_RATE > 0.15 & \
+        UGDS > 10000 &  \
+        CCUGPROF > 9 & \
+        CCBASIC >= 15 & \
+        CCBASIC < 17 & \
+        PREDDEG == 3 \
+        '
+df_filtered = df.query(query)
+df_small = df_filtered
+
+#Choose a smaller set of columns and give them friendlier names
+#SYCR = six-year completion rate overall, SYCRW, SYCRB, SYCRH is SYCR for White students, Black students and Hispanice students, respectively
+
+df_small = df_small[['INSTNM','ADM_RATE','UGDS','UGDS_WHITE','UGDS_BLACK','UGDS_HISP','C150_4','C150_4_WHITE',
+                        'C150_4_BLACK','C150_4_HISP','COSTT4_A','AVGFACSAL','INEXPFTE','RET_FT4_POOLED','UG25ABV','FTFTPCTPELL','LOCALE','CCBASIC','CCUGPROF',
+                        'CCSIZSET','TUITIONFEE_OUT','TUITIONFEE_IN']]
+df_small.columns = ['Name','Admission_Rate','Undergraduates','Undergrads_White','Undergrads_Black','Undergrads_Hisp','SYCR','SYCRW','SYCRB','SYCRH',
+                    'Avg_Tot_Cost_of_Attendance','Average_Faculty_Salary','Instr_Exp_per_FTE','Retention_Rate','Undergrads_over_25','Pell_Grants',
+                    'Locale','Carnegie Classification','CCUGPROF','Size & Setting','Out_of_State_Tuition_Fees','In_State_Tuition_Fees']
+                    
+df_small.reset_index(inplace=True,drop=True)
+#Give CU a marker so that it can be given a unique symbol in plots.  
+df_small['CU'] = ['CU' if x =='University of Colorado Boulder' else 'not CU' for x in df_small['Name']]
+```
+
+# Six-year Completion Rates for 41 Institutions
+
+Figure 1 shows six-year completion rate (SYCR) for the 41 schools analyzed, sorted by overall SYCR. You can hover over individual points to get the SYCR. In most cases, the Hispanic SYCR falls between those for Black and White students. The University of Oklahoma, Norman (12th from the top) is an exception, where the SYCR for Hispanic students slightly exceeds that for White students. Our target school, CU Boulder, is 13th from the top.
+
+The horizontal spread of points for any given school is a measure of the gap between the highest and lowest SYCR. The first three schools in the top five (Michigan, Wisconsin, Ohio State) have a fairly small spread whereas the next two (Illinois, Michigan State) have a higher spread.
+
+```{python}
+#| label: fig-dumbbell
+#| fig-cap: "Six-year Completion Rates for 41 Schools"
+
+df_dumbell = df_small[['Name','SYCRW','SYCRB','SYCRH']]
+df_dumbell = df_dumbell.melt(id_vars = 'Name',value_vars=['SYCRW','SYCRB','SYCRH'],var_name='Student Ethnicity',value_name='SYCR')
+
+universities = (
+    df_dumbell.loc[df_dumbell['Student Ethnicity'] == 'SYCRW'].sort_values(by=["SYCR"], ascending=True)["Name"].unique()
+)
+
+
+data = {"line_x": [], "line_y": [], "White Students": [], "Black Students": [], "Hispanic Students": [], "colors": [], "Ethnicities": [], "universities": []}
+
+for university in universities:
+    data["White Students"].extend([df_dumbell.loc[(df_dumbell["Student Ethnicity"] == 'SYCRW') & (df_dumbell.Name == university)]["SYCR"].values[0]])
+    data["Black Students"].extend([df_dumbell.loc[(df_dumbell["Student Ethnicity"] == 'SYCRB') & (df_dumbell.Name == university)]["SYCR"].values[0]])
+    data["Hispanic Students"].extend([df_dumbell.loc[(df_dumbell["Student Ethnicity"] == 'SYCRH') & (df_dumbell.Name == university)]["SYCR"].values[0]])
+    data["line_x"].extend(
+        [
+            df_dumbell.loc[(df_dumbell["Student Ethnicity"] == 'SYCRW') & (df_dumbell.Name == university)]["SYCR"].values[0],
+            df_dumbell.loc[(df_dumbell["Student Ethnicity"] == 'SYCRB') & (df_dumbell.Name == university)]["SYCR"].values[0],
+            df_dumbell.loc[(df_dumbell["Student Ethnicity"] == 'SYCRH') & (df_dumbell.Name == university)]["SYCR"].values[0],
+            None,
+        ]
+    )
+    data["line_y"].extend([university, university, university, None])
+
+
+fig = go.Figure(
+    data=[
+        go.Scatter(
+            x=data["line_x"],
+            y=data["line_y"],
+            mode="lines",
+            showlegend=False,
+            marker=dict(
+                color="grey"
+            )
+        ),
+        go.Scatter(
+            x=data["White Students"],
+            y=universities,
+            mode="markers",
+            name="White Students",
+            marker=dict(
+                color="mediumblue",
+                size=10
+            )
+            
+        ),
+        go.Scatter(
+            x=data["Black Students"],
+            y=universities,
+            mode="markers",
+            name="Black Students",
+            marker=dict(
+                color="mediumpurple",
+                size=10
+            )   
+        ),
+        go.Scatter(
+            x=data["Hispanic Students"],
+            y=universities,
+            mode="markers",
+            name="Hispanic Students",
+            marker=dict(
+                color="mediumorchid",
+                size=10
+            )   
+        ),
+    ]
+)
+
+fig.update_xaxes(tickformat='.0%',range =[0,1],title='Six-year completion rate')
+
+fig.update_layout(
+    title="Six-year Completion Rates for 41 Universities",
+    height=1000,
+    width=1000,
+    legend_itemclick=False,
+)
+
+fig.show()
+```
+
+# Predicting SYCR
+
+This section presents details on the linear regression to predict SYCR for White, Black and Hispanic students at the 41 selected universities.
+
+## Selecting the 6 predictors
+
+This section describes the process for selecting the 6 predictors used in the regression equation.
+
+-   Loop through the numeric variables in the data and find the highest and lowest correlations with SYCR.
+-   To avoid bias, do this separately for each ethnicity. The predictor had to be among the highest or lowest for each.
+-   Exclude variables that are themselves about completion or retention.
+-   Exclude variables that had a high number of missing values (e.g. ACT scores)
+-   Exclude variables that had high correlations with other variables in the model.
+
+## Standardized variables
+
+The variables were on different scales, so to make the regression coefficients interpretable, I gave all variables a mean of 0 and a standard deviation of 1. That way, regression coefficients could be interpreted as follows:
+
+> For every 1 standard deviation change in the predictor there is a 𝛽 standard deviation change in SYCR, holding other predictors constant.
+
+```{python}
+from scipy import stats
+#Create a new data frame that will contain our standardized scores (mean=1, sd=0) that we will use in the regression
+#Doing this in case we want raw scores later
+df_reg = df_small.copy()
+#Define the set of columns to transform
+columns_to_transform = ['SYCRW','SYCRB','SYCRH','Average_Faculty_Salary','Out_of_State_Tuition_Fees','Admission_Rate','Avg_Tot_Cost_of_Attendance','Pell_Grants','Undergrads_over_25']
+#Loop through columns in the list and transform them
+for c in columns_to_transform:
+  df_reg[c] = stats.zscore(df_reg[c])
+
+```
+
+## Predictors for Each Ethnicity
+
+The same six variables were used in a regression equation for White, Black and Hispanic student SYCR, respectively. The results are shown in the table below.
+
+```{python}
+# Code for running the regression
+from statsmodels.formula.api import ols
+
+#Create separate regression formulas for White, Black and Hispance students respectively.  
+#The formulas are the same except for the independent variable, which is the SYCR for that ethnic group
+
+ols_formulaw = "SYCRW ~  Average_Faculty_Salary+ Avg_Tot_Cost_of_Attendance + Out_of_State_Tuition_Fees + Admission_Rate+Undergrads_over_25+Pell_Grants + Undergrads_over_25*Pell_Grants + Avg_Tot_Cost_of_Attendance*Out_of_State_Tuition_Fees"
+ols_formulab = "SYCRB ~  Average_Faculty_Salary+ Avg_Tot_Cost_of_Attendance + Out_of_State_Tuition_Fees + Admission_Rate+Undergrads_over_25+Pell_Grants + Undergrads_over_25*Pell_Grants + Avg_Tot_Cost_of_Attendance*Out_of_State_Tuition_Fees"
+ols_formulah = "SYCRH ~  Average_Faculty_Salary+ Avg_Tot_Cost_of_Attendance + Out_of_State_Tuition_Fees + Admission_Rate+Undergrads_over_25+Pell_Grants + Undergrads_over_25*Pell_Grants + Avg_Tot_Cost_of_Attendance*Out_of_State_Tuition_Fees"
+
+#Create and fit the models using the formulas above.
+#If I run this earlier, maybe I can use the output to construct the table?
+OLSw = ols(formula = ols_formulaw, hasconst=False, data = df_reg)
+OLSb = ols(formula = ols_formulab, hasconst=False, data = df_reg)
+OLSh = ols(formula = ols_formulah, hasconst=False, data = df_reg)
+modelw = OLSw.fit()
+modelb = OLSb.fit()
+modelh = OLSh.fit()
+
+#Generate predicted scores
+predw = modelw.predict()
+predb = modelb.predict()
+predh = modelh.predict()
+
+```
+
+| Predictor                              | White Students | Black Students | Hispanic Students |
+|------------------------|:---------------|:---------------|:---------------|
+| Average faculty salary                 | .17 \*\*       | .09            | .10               |
+| Average total cost of attendance       | .21 \*\*\*     | .19 \*         | .23 \*\*\*        |
+| Out of state tuition and fees          | .17 \*\*       | .31 \*\*\*     | .35 \*\*\*        |
+| Admission rate                         | -.26 \*\*\*    | -.32 \*\*\*    | -.30 \*\*\*       |
+| Percentage of Pell Grants              | -.26 \*\*\*    | -.32 \*\*      | -.32 \*\*\*       |
+| Percent undergrads age 25+             | -.42 \*\*\*    | -.18           | -.20 \*\*\*       |
+| Undergrads over 25 \* Pell Grants      | 0.16 \*\*      | 0.14           | 0.16 \*           |
+| Average total cost \* Out of state T&F | -0.19 \*\*\*   | -0.17 \*       | -0.25 \*\*\*      |
+| **F-statistic**                        | 46.7 \*\*\*    | 15.4 \*\*\*    | 25.7 \*\*\*       |
+| **Adjusted R^2^**                      | .91            | .76            | .84               |
+
+: Regression Coefficients for White, Black and Hispanic Students (*p* \< \| \* .1, \*\* .05, \*\*\* .01)
+
+Three of the predictors have a positive relationship with SYCR and three have a negative effect. Increases in average faculty salary, average total cost of tuition and out of state tuition and fees are all associated with an increase in SYCR. Increases in admission rate, percentage of students with Pell Grants and percentage of students over 25 years old are all associated with decreases in SYCR. The regression coefficients, also called beta weights, can be interpreted as follows:
+
+> For every 1 standard deviation change in the predictor there is a 𝛽 standard deviation change in SYCR, holding other predictors constant.
+
+So, for example, for every 1 standard deviation change in faculty salary there is a .17 standard deviation change in six-year completion rate for White students, .09 for Black students and .10 for Hispanic students.
+
+The predictors can be thought of as falling into two groups: economic selection factors and ability to succeed factors. For all of the predictors, the warning that *correlation is not causality* should be remembered. For example, does paying faculty more directly lead to higher six-year completion rates? Or is higher average faculty salary correlated with one or more other factors that cause higher completion rates (like student self-selection)?
+
+### Economic selection
+
+The first 3 predictors (faculty salary, total cost and out of state T&F) and the Pell Grants predictor could all represent economic selection factors on students. The fact that higher cost of attendance and higher out of state tuition and fees lead to higher SYCR could indicate that the economic factors that make it possible for you to attend a more costly institution also favor your ability to complete a degree. Having a lower percentage of Pell Grant recipients is possibly an indicator of the same thing: that is, more of the student body has been selected by those advantageous economic factors. As discussed earlier, it is possible that higher average faculty salary represents a direct effect on SYCR. The fact that it is not a statistically significant factor for Black and Hispanic students could further indicate that the increased salaries are not going to the areas that affect those students. Higher faculty salaries could also be a result of institutions being more economically advantaged and therefore able to pay higher salaries to some faculty and at the same time, charge premium prices to their students, engaging the economic selection factors and their advantages described above.
+
+### Ability to succeed
+
+A higher admission rate and a higher percentage of students over 25 both predict lower SYCR. These could both represent selection of students who are potentially less able to succeed in a traditional university setting. For students over 25, [it is known](https://hechingerreport.org/universities-that-are-recruiting-older-students-often-leave-them-floundering/) that they often struggle because the structure of the university education doesn't match well with the demands of having a job, married life with children, and other factors. Having a higher admission rate may mean that students are being admitted that have less of an academic track record of success and may therefore be unequipped to succeed at university. A university seeking to serve the public better by increasing the diversity of students along these dimensions will have a lower SYCR.
+
+Both the positive and negative predictors show us that you can't just look at the SYCR for a university to judge its overall ability to matriculate students in six years. The contextual factors related to economic selection and ability to succeed are important to understand.
+
+### Comparing CU Boulder to some reference institutions
+
+In Figure 2 below, regression lines are fit to the predicted (x-axis) vs actual (y-axis) SYCR in standardized form for White, Black and Hispanic students, respectively. You can mouse over any of the points to see the predictor variables in their standardized form, along with the number of undergrads in unstandardized form.
+
+```{python}
+#Prepare data for plotting
+
+#Create a plotting-specific data frame
+df_reg_p = df_reg
+
+#Add predicted scores to the data frame
+df_reg_p['predw'] = predw
+df_reg_p['predb'] = predb
+df_reg_p['predh'] = predh
+#Round values to two places so they look nice in mouse-overs
+df_reg_p['SYCRW'] = round(df_reg_p['SYCRW'],2)
+df_reg_p['SYCRB'] = round(df_reg_p['SYCRB'],2)
+df_reg_p['SYCRH'] = round(df_reg_p['SYCRH'],2)
+df_reg_p['predw'] = round(df_reg_p['predw'],2)
+df_reg_p['predb'] = round(df_reg_p['predb'],2)
+df_reg_p['predh'] = round(df_reg_p['predh'],2)
+#Prepare a column that has values that map to a color palette
+df_reg_p['colors'] = 1
+df_reg_p.colors[df_reg_p.Name == 'University of Michigan-Ann Arbor'] = 2
+df_reg_p.colors[df_reg_p.Name == 'University of Wisconsin-Madison'] = 3
+df_reg_p.colors[df_reg_p.Name == 'University of Illinois Urbana-Champaign'] = 4
+df_reg_p.colors[df_reg_p.Name == 'University of Colorado Boulder'] = 5
+df_reg_p.colors[df_reg_p.Name == 'Colorado State University-Fort Collins'] = 6
+df_reg_p.colors[df_reg_p.Name == 'University of Missouri-Columbia'] = 7
+df_reg_p.colors[df_reg_p.Name == 'University of Oklahoma-Norman Campus'] = 8
+#Sorting the values makes sure they get assigned in the desired order
+df_reg_p = df_reg_p.sort_values(by='colors')
+#Convert the color indicators to a string for plotting - it needs to be a categorical variable
+df_reg_p = df_reg_p.astype({'colors':'string'})
+```
+
+```{python}
+#| label: fig-SYCR
+#| fig-cap: "Actual vs Predicted SYCR for 41 universities"
+#| fig-subcap:
+#|   - "White Students"
+#|   - "Black Students"
+#|   - "Hispanic Students"
+#| layout-ncol: 3
+#| column: page
+
+#Create the plots and display them in a group
+#Will use some functionality native to Quarto here, the tool used for creating the online document from code from within R Studio.
+
+def SYCR_plot(ind,pred,SYCR):
+  fig = px.scatter(df_reg_p, x=pred, y=SYCR, width=400, height=320, trendline="ols", trendline_scope="overall",
+                   symbol='CU',color='colors',
+                   color_discrete_sequence=["#D3D3D3","#00274C","#C5050C","#E84A27","#565A5C","#006A4D","#F1B82D","#841617"],
+                   labels={
+                       SYCR: "Standardized SYCR",
+                       pred: "Predicted Standardized SYCR",
+                   },
+                  hover_name="Name",hover_data={'Name':True,
+                                                     'CU':False,
+                                                     'colors':False,
+                                                   'Average_Faculty_Salary':':.2f',
+                                                   'Avg_Tot_Cost_of_Attendance':':.2f',
+                                                   'Out_of_State_Tuition_Fees':':.2f',
+                                                   'Admission_Rate':':.2f',
+                                                   'Undergrads_over_25':':.2f',
+                                                   'Pell_Grants':':.2f',
+                                                   'Undergraduates':':,'
+                                                          })
+  fig.update_layout(showlegend=False)
+  fig.update_traces(opacity=.8)
+  fig.update_xaxes(range=[-2.3,2.75])
+  fig.update_yaxes(range=[-2.3, 2.75])
+  fig.update_traces(marker={'size': 10})
+  fig.update_layout(
+    margin=dict(l=5, r=5, t=10, b=5),
+    showlegend=False
+  )
+  if ind > 1:
+    fig.update_layout(yaxis_title=' ', xaxis_title=' ')
+  
+  fig.show()
+  
+SYCR_plot(1,'predw','SYCRW')
+SYCR_plot(2,'predb','SYCRB')
+SYCR_plot(3,'predh','SYCRH')
+```
+
+Six reference universities are also highlighted on the graph in addition to CU Boulder. The color codes for those are shown below.
+
+![](Screenshot%20from%202023-08-21%2014-59-02.png)
+
+They are, from left to right:
+
+-   University of Michigan, Ann-Arbor
+-   University of Wisconsin, Madison
+-   University of Illinois, Urbana-Champaign
+-   University of Oklahoma, Norman
+-   University of Colorado, Boulder
+-   University of Missouri, Columbia
+-   Colorado State University, Fort Collins
+
+If a point is above the regression line, it can be thought of as over-performing the regression equation - that is the actual value for SYCR is more than you would expect given the predictors. Conversely, if a point is below the line, it is under-performing the predictions.
+
+Figure 2a above shows that our reference schools all fall pretty close to the line predicting SYCR for White students, except for CU Boulder and Missouri, which seem to be underperforming a bit. Completely diagnosing the underperformance is beyond the scope of this document, but an example of under-performance for CU Boulder is that its faculty salaries are similar to that of Michigan (mouse over to see), its out of state tuition and fees are like and its total cost of attendance is like Michigan and Illinois, but it's SYCR is much lower.
+
+Figures 2b and 2c show that the University of Oklahoma, Norman is over-performing for Black and Hispanic SYCR rates and Colorado State university is over-performing in terms of Black SYCR. The point of this analysis is to provide reference points for schools that might be models to study to better understand how to improve these rates.
+
+# Conclusions
+
+Six predictors do a good job predicting six-year completion rates (SYCR) for 41 universities that are large research institutions. The six predictors could be grouped into economic selection factors and ability to succeed factors. Two universities that outperform the predictions for Black and Hispanic students were identified and might be models for further study into how to improve SYCR. If a decision is made to continue this line of analysis, the following are some possible areas of follow-up:
+
+-   Average faculty salary wasn't a statistically significant predictor for Black and Hispanic students. Is there a predictor we could replace it with that would be statistically significant for all groups? Can we find out what faculty get the biggest share of pay at each university and see if there are disparities in which ethnicities take those classes?
+
+-   Possibly expand the analysis to more ethnicities and see if that changes what predictors are universal.
+
+-   How would our conclusions change if we expanded the list of universities?
+
+Please feel free to contact the author with any comments or suggestions at jayson.m.webb\@gmail.com.
