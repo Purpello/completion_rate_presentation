@@ -8,5 +8,5 @@ This was a an analysis that I initiated and completed while preparing for a job 
 
 -Running Python in RStudio code and utilizing [Quarto](https://quarto.org/) to create the report
 
-This repository also includes the raw data used in the analysis and the RStudio/Quarto code (the .qmd file).
+This repository also includes the data dictionary for the raw data, which can be downloaded via a link in the report.  The code for creating the report in RStudio/Quarto is the .qmd file.
 
